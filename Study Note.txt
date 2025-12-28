@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Study Note</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Gamja+Flower&display=swap" rel="stylesheet">
+
+<style>
+body{
+  background:#f3f3f3;
+  font-family:'Gamja Flower', cursive;
+}
+.container{
+  width:1200px;
+  margin:20px auto;
+  background:#fff;
+  padding:25px;
+  border:1px solid #ccc;
+}
+h2,h3{ border-bottom:1px solid #ddd; }
+
+input{
+  border:none;
+  border-bottom:1px solid #aaa;
+  background:transparent;
+  font-family:inherit;
+  font-size:18px;
+}
+button{
+  background:#333;
+  color:#fff;
+  border:none;
+  padding:5px 10px;
+  cursor:pointer;
+  font-family:inherit;
+}
+.flex{
+  display:flex;
+  gap:15px;
+  align-items:center;
+}
+.task-area{
+  align-items:flex-start;
+}
+
+/* TASKS */
+.tasks table{
+  width:100%;
+  border-collapse:collapse;
+}
+.tasks td{
+  border-bottom:1px solid #ddd;
+  padding:4px;
+  vertical-align:top;
+}
+.subject{ width:12%; }
+.content{ width:73%; }
+.check{ width:5%; text-align:center; }
+.del{ width:5%; text-align:center; }
+.tasks input{ width:100%; }
+.del button{
+  background:none;
+  color:#555;
+  font-size:14px;
+}
+
+/* TIMETABLE */
+.timetable{ display:flex; }
+.labels{ width:60px; font-size:14px; }
+.label{ height:20px; }
+.grid{
+  display:grid;
+  grid-template-columns:repeat(6,1fr);
+  width:100%;
+}
+.cell{
+  height:20px;
+  background:#eee;
+  border:1px solid #fff;
+  cursor:pointer;
+}
+.cell.active{ background:#333; }
+
+/* TIMER */
+.timer{ display:flex; gap:8px; align-items:center; margin-bottom:6px; }
+.timer input{ width:80px; font-size:14px; }
+
+/* CALENDAR */
+#calendar{
+  position:absolute;
+  background:#fff;
+  border:1px solid #aaa;
+  padding:10px;
+  display:none;
+}
+.cal-grid{
+  display:grid;
+  grid-template-columns:repeat(7,1fr);
+  gap:5px;
+}
+.cal-day{
+  height:70px;
+  padding:4px;
+  font-size:14px;
+  display:flex;
+  flex-direction:column;
+  justify-content:space-between;
+}
+.cal-day span.time{ font-size:12px; }
+</style>
+</head>
+
+<body>
+<div class="container">
+
+<h2>Study Note</h2>
+
+<div class="flex">
+  <input type="date" id="date">
+  <button onclick="toggleCalendar()">📅</button>
+  <input id="totalTime" readonly value="0h 0m">
+</div>
+
+<div id="calendar"></div>
+
+<div class="flex">
+  <input id="comment" placeholder="Comment" style="width:100%">
+</div>
+
+<hr>
+
+<div class="flex task-area">
+  <div class="tasks" style="width:55%">
+    <h3>Tasks</h3>
+    <table id="taskTable"></table>
+    <button onclick="addTask()">Add Task</button>
+  </div>
+
+  <div style="width:45%">
+    <h3>Timetable (6 AM)</h3>
+    <div class="timetable">
+      <div class="labels" id="labels"></div>
+      <div class="grid" id="grid"></div>
+    </div>
+  </div>
+</div>
+
+<hr>
+
+<h3>Timer</h3>
+<div id="timers"></div>
+<button onclick="addTimer()">Add Timer</button>
+
+<hr>
+<button onclick="saveData()">Save</button>
+
+</div>
+
+<script>
+const dateInput=document.getElementById("date");
+const taskTable=document.getElementById("taskTable");
+const calendar=document.getElementById("calendar");
+const timersDiv=document.getElementById("timers");
+const grid=document.getElementById("grid");
+const labels=document.getElementById("labels");
+
+dateInput.valueAsDate=new Date();
+dateInput.onchange=()=>{ loadData(); drawCalendar(); };
+
+const cells=[];
+let active=new Set();
+let dragging=false;
+let dragMode="add";
+let startIndex=null;
+
+/* TIME GRID */
+for(let h=6;h<30;h++){
+  for(let m=0;m<6;m++){
+    if(m===0){
+      const l=document.createElement("div");
+      l.className="label";
+      l.textContent=(h%24)+":00";
+      labels.appendChild(l);
+    }
+    const c=document.createElement("div");
+    c.className="cell";
+    grid.appendChild(c);
+    cells.push(c);
+  }
+}
+
+/* ✅ 안정적인 가로 드래그 */
+cells.forEach((c,i)=>{
+  c.onmousedown=()=>{
+    dragging=true;
+    startIndex=i;
+    dragMode=active.has(i)?"remove":"add";
+    applyCell(i);
+  };
+  c.onmouseover=()=>{
+    if(!dragging) return;
+    const [s,e]=[Math.min(startIndex,i),Math.max(startIndex,i)];
+    for(let k=s;k<=e;k++) applyCell(k,true);
+  };
+});
+document.body.onmouseup=()=>dragging=false;
+
+function applyCell(i){
+  if(dragMode==="add"){
+    if(!active.has(i)){
+      active.add(i);
+      cells[i].classList.add("active");
+    }
+  }else{
+    if(active.has(i)){
+      active.delete(i);
+      cells[i].classList.remove("active");
+    }
+  }
+  updateTotal();
+}
+
+/* TASKS */
+function addTask(data={}){
+  const r=document.createElement("tr");
+  r.innerHTML=`
+    <td class="subject"><input value="${data.s||""}"></td>
+    <td class="content"><input value="${data.c||""}"></td>
+    <td class="check"><input type="checkbox" ${data.d?"checked":""}></td>
+    <td class="del"><button onclick="this.closest('tr').remove()">×</button></td>`;
+  taskTable.appendChild(r);
+}
+
+/* TIMER */
+let timers=[];
+function addTimer(data={title:"",sec:0}){
+  timers.push({...data,run:false});
+  renderTimers();
+}
+function renderTimers(){
+  timersDiv.innerHTML="";
+  timers.forEach((t,i)=>{
+    const d=document.createElement("div");
+    d.className="timer";
+    d.innerHTML=`
+      <input value="${t.title}" placeholder="Title"
+        oninput="timers[${i}].title=this.value">
+      <span>${new Date(t.sec*1000).toISOString().substr(11,8)}</span>
+      <button onclick="start(${i})">▶</button>
+      <button onclick="stop(${i})">■</button>
+      <button onclick="reset(${i})">↺</button>
+      <button onclick="removeTimer(${i})">×</button>`;
+    timersDiv.appendChild(d);
+  });
+}
+function start(i){
+  if(timers[i].run) return;
+  timers[i].run=true;
+  timers[i].int=setInterval(()=>{
+    timers[i].sec++;
+    updateTotal();
+    renderTimers();
+  },1000);
+}
+function stop(i){ timers[i].run=false; clearInterval(timers[i].int); }
+function reset(i){ timers[i].sec=0; updateTotal(); renderTimers(); }
+function removeTimer(i){ stop(i); timers.splice(i,1); updateTotal(); renderTimers(); }
+
+/* TOTAL */
+function updateTotal(){
+  const min=active.size*10;
+  const sec=timers.reduce((a,b)=>a+b.sec,0);
+  const total=min*60+sec;
+  totalTime.value=Math.floor(total/3600)+"h "+Math.floor(total%3600/60)+"m";
+}
+
+/* SAVE / LOAD */
+function saveData(){
+  const data={
+    comment:comment.value,
+    cells:[...active],
+    timers:timers.map(t=>({title:t.title,sec:t.sec})),
+    tasks:[...taskTable.rows].map(r=>({
+      s:r.cells[0].children[0].value,
+      c:r.cells[1].children[0].value,
+      d:r.cells[2].children[0].checked
+    })),
+    total:totalTime.value
+  };
+  localStorage.setItem("study_"+dateInput.value,JSON.stringify(data));
+  drawCalendar();
+}
+function loadData(){
+  active.clear();
+  cells.forEach(c=>c.classList.remove("active"));
+  timers=[];
+  taskTable.innerHTML="";
+  comment.value="";
+  const d=JSON.parse(localStorage.getItem("study_"+dateInput.value));
+  if(!d){ addTask(); updateTotal(); return; }
+  d.cells.forEach(i=>{
+    active.add(i);
+    cells[i].classList.add("active");
+  });
+  d.tasks.forEach(t=>addTask(t));
+  d.timers.forEach(t=>addTimer(t));
+  comment.value=d.comment||"";
+  updateTotal();
+}
+addTask();
+loadData();
+
+/* CALENDAR */
+function toggleCalendar(){
+  calendar.style.display=calendar.style.display==="block"?"none":"block";
+  drawCalendar();
+}
+function drawCalendar(){
+  calendar.innerHTML="";
+  const d=new Date(dateInput.value);
+  const y=d.getFullYear(), m=d.getMonth();
+  const first=new Date(y,m,1).getDay();
+  const last=new Date(y,m+1,0).getDate();
+  const g=document.createElement("div");
+  g.className="cal-grid";
+
+  for(let i=0;i<first;i++) g.appendChild(document.createElement("div"));
+
+  for(let i=1;i<=last;i++){
+    const key=`${y}-${String(m+1).padStart(2,"0")}-${String(i).padStart(2,"0")}`;
+    const data=JSON.parse(localStorage.getItem("study_"+key));
+    let min=0;
+    if(data){
+      const [h,mn]=data.total.split(" ");
+      min=parseInt(h)*60+parseInt(mn);
+    }
+    const div=document.createElement("div");
+    div.className="cal-day";
+
+    if(min===0){
+      div.style.background="#fff";
+    }else{
+      const shade=Math.max(40,220-Math.min(min/3,180));
+      div.style.background=`rgb(${shade},${shade},${shade})`;
+      div.style.color=shade<100?"#fff":"#000";
+    }
+
+    div.innerHTML=`<span>${i}</span><span class="time">${min?Math.floor(min/60)+"h "+(min%60)+"m":""}</span>`;
+    g.appendChild(div);
+  }
+  calendar.appendChild(g);
+}
+</script>
+</body>
+</html>
